@@ -22,6 +22,18 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Features
+
+PawPal+ currently includes the following implemented scheduling features:
+
+- Priority-first daily planning: tasks are ranked in HIGH → MEDIUM → LOW order and scheduled sequentially within the owner day window.
+- Constraint-aware filtering: tasks are excluded when they fall outside the allowed day window or exceed the configured daily time limit.
+- Sorting by time: task lists can be sorted chronologically using HH:MM parsing rather than string comparison.
+- Task filtering views: tasks can be filtered by status (for example, pending vs completed) and by pet name (case-insensitive).
+- Conflict warnings: overlapping scheduled intervals are detected with interval-overlap logic and reported as non-blocking warnings.
+- Daily and weekly recurrence: completing a recurring task automatically creates the next pending instance for supported recurrence types.
+- Explainable schedule output: each scheduled task includes a human-readable explanation describing when and why it was scheduled.
+
 ## Getting started
 
 ## Smarter Scheduling

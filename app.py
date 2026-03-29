@@ -49,6 +49,19 @@ At minimum, your system should:
 
 st.divider()
 
+
+def format_minutes(total_minutes: int) -> str:
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def find_pet_name(owner_obj: Owner, task_obj) -> str:
+    for pet_obj in owner_obj.pets:
+        if task_obj in pet_obj.default_tasks:
+            return pet_obj.name
+    return "Unknown Pet"
+
 st.subheader("Owner")
 owner_name = st.text_input("Owner name", value="Jordan")
 
@@ -110,24 +123,72 @@ if owner.pets:
             "medium": Priority.MEDIUM,
             "high": Priority.HIGH,
         }[priority_label]
-        target_pet.create_task(title=task_title.strip() or "Untitled task", duration=int(duration), priority=priority_value)
+        created_task = target_pet.create_task(
+            title=task_title.strip() or "Untitled task",
+            duration=int(duration),
+            priority=priority_value,
+        )
+        created_task.time = "08:00"
         st.success(f"Added task for {target_pet.name}.")
 
-all_tasks = []
-for pet in owner.pets:
-    for task in pet.default_tasks:
-        all_tasks.append(
-            {
-                "pet": pet.name,
-                "title": task.title,
-                "duration_minutes": task.duration_minutes,
-                "priority": task.priority.value,
-            }
-        )
+display_scheduler = Scheduler(
+    owner=owner,
+    day_window=owner.availability.day_window,
+    constraints=Constraints(max_daily_minutes=owner.preferences.max_daily_minutes),
+)
 
-if all_tasks:
-    st.write("Current tasks:")
-    st.table(all_tasks)
+task_objects = [task for pet in owner.pets for task in pet.default_tasks]
+
+
+def to_task_rows(tasks_to_render) -> list[dict]:
+    return [
+        {
+            "pet": find_pet_name(owner, task),
+            "title": task.title,
+            "time": task.time,
+            "duration_minutes": task.duration_minutes,
+            "priority": task.priority.value,
+            "status": task.status.value,
+        }
+        for task in tasks_to_render
+    ]
+
+if task_objects:
+    st.success("Tasks loaded. Use the tables below to review sorted and filtered views.")
+
+    sorted_by_time = display_scheduler.sort_by_time(task_objects)
+    st.write("Current Tasks (Sorted by Time)")
+    st.table(to_task_rows(sorted_by_time))
+
+    pending_tasks = display_scheduler.filter_tasks(tasks=task_objects, status=TaskStatus.PENDING)
+    completed_tasks = display_scheduler.filter_tasks(tasks=task_objects, status=TaskStatus.COMPLETED)
+
+    col_left, col_right = st.columns(2)
+    with col_left:
+        st.write("Pending Tasks")
+        if pending_tasks:
+            st.table(to_task_rows(display_scheduler.sort_by_time(pending_tasks)))
+        else:
+            st.info("No pending tasks yet.")
+    with col_right:
+        st.write("Completed Tasks")
+        if completed_tasks:
+            st.table(to_task_rows(display_scheduler.sort_by_time(completed_tasks)))
+        else:
+            st.info("No completed tasks yet.")
+
+    selected_pet_filter = st.selectbox(
+        "Filter tasks by pet",
+        ["All pets"] + [pet.name for pet in owner.pets],
+        key="pet_filter_selector",
+    )
+    if selected_pet_filter != "All pets":
+        pet_filtered_tasks = display_scheduler.filter_tasks(tasks=task_objects, pet_name=selected_pet_filter)
+        st.write(f"Tasks for {selected_pet_filter}")
+        if pet_filtered_tasks:
+            st.table(to_task_rows(display_scheduler.sort_by_time(pet_filtered_tasks)))
+        else:
+            st.warning(f"No tasks found for {selected_pet_filter}.")
 else:
     st.info("Add at least one pet before creating tasks.")
 
@@ -150,14 +211,24 @@ if st.button("Generate schedule"):
         st.table(
             [
                 {
+                    "pet": find_pet_name(owner, task),
                     "task": task.title,
                     "priority": task.priority.value,
-                    "start_minute": task.scheduled_start,
+                    "start_time": format_minutes(task.scheduled_start or 0),
+                    "end_time": format_minutes((task.scheduled_start or 0) + task.duration_minutes),
                     "duration_minutes": task.duration_minutes,
                 }
                 for task in plan.tasks
             ]
         )
+
+        conflict_warnings = scheduler.detect_schedule_conflicts(plan.tasks)
+        if conflict_warnings:
+            for conflict in conflict_warnings:
+                st.warning(conflict)
+        else:
+            st.success("No schedule conflicts detected.")
+
         st.write("Why these tasks were chosen:")
         for explanation in plan.explanations:
             st.write(f"- {explanation}")

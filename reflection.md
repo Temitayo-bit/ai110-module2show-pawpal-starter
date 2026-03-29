@@ -3,12 +3,15 @@
 ## 1. System Design
 
 **a. Initial design**
-- The initial requirements focused on letting a user add one or more pets, create tasks such as walks or feedings, and see plans for today and future days.
-- Designed four core classes: `Owner`, `Pet`, `Task`, and `Scheduler`. `Owner` keeps contact info, availability, preferences, and a list of pets. `Pet` stores identity, needs, and default tasks while helping create new task entries. `Task` holds the work item, duration, priority, preferred time, and completion status. `Scheduler` gathers tasks from the owner, applies constraints, orders tasks, and builds the daily plan with explanations.
+- I started by keeping the model simple and clean: Owner, Pet, Task, and Scheduler.
+- Owner holds availability, preferences, and pets. Pet owns tasks. Task stores priority, duration, recurrence, status, and optional scheduled time. Scheduler is the decision engine.
+- I wanted the UI layer to stay thin and call scheduler methods instead of duplicating logic in Streamlit.
 
 **b. Design changes**
 
-- Yes. I realized the scheduler needed a stronger tie back to the owner so it always uses that owner’s pets/tasks instead of floating Task lists. I added methods to `Owner`/`Pet` so the scheduler can call `owner.gather_tasks()` and cache those candidates internally. That change let me add pre-filtering logic (day window, max minutes) before sorting tasks and then walk the ranked list sequentially, assigning start minutes so every task in the plan has a concrete why.
+- I changed the design after the first pass.
+- At first, I treated task lists as external inputs, but that felt loose. I moved to owner.gather_tasks so Scheduler always pulls from the source of truth.
+- I also added filtering before ranking, then sequential scheduling in a day window. That made behavior easier to test and explain.
 
 ---
 
@@ -16,13 +19,16 @@
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+- My scheduler considers priority, day window, and max daily minutes.
+- It also supports recurring tasks (daily and weekly), status filtering, time sorting, and conflict warnings for overlapping scheduled intervals.
+- I prioritized constraints that a real user feels immediately: not enough time in the day, urgent tasks first, and clear warnings when two tasks overlap.
 
 **b. Tradeoffs**
 
-- One tradeoff I made is that my scheduler builds the day in a simple linear order (priority first, then next available slot) instead of trying to optimize every possible combination of tasks and time windows. That means it is faster and easier to explain, but it can miss a “perfect” plan in edge cases where a different ordering would fit more tasks.
-- I think that tradeoff is reasonable for this scenario because PawPal+ is meant to feel practical and understandable for a busy pet owner. A clear, predictable schedule with explanations is more useful here than a super-complex optimizer that is harder to debug and justify.
+- My main tradeoff was clarity over optimization.
+- I used a priority-first, sequential scheduler instead of a heavy optimization algorithm.
+- That means it is predictable and explainable, but it may not always find the mathematically best possible arrangement.
+- For this project, I think that is the right tradeoff because users need trust and simplicity first.
 
 ---
 
@@ -30,13 +36,26 @@
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+- I used VS Code Copilot for design iteration, writing tests faster, and tightening edge-case handling.
+- The most effective Copilot features for this scheduler were:
+	- fast code suggestions while building methods,
+	- chat-driven test generation for happy paths and edge cases,
+	- quick refactor support when moving logic from UI into Scheduler methods.
+- The best prompts were specific and constraint-based, like: add tests for duplicate times, pets with no tasks, unsupported recurrence values, and case-insensitive filters.
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+- One AI suggestion I rejected as-is was introducing extra complexity in scheduling behavior before core logic was stable.
+- I kept the cleaner architecture: Scheduler owns planning logic, app only displays results.
+- I evaluated suggestions by checking three things: does this keep design clean, does it match requirements, and do tests prove it.
+- I only kept changes that passed pytest and improved readability.
+
+**c. AI strategy reflection**
+
+- Using separate chat sessions for different phases helped a lot.
+- I kept one phase focused on system design, one on implementation, one on testing, and one on docs polish.
+- That separation stopped context drift and made each session goal-driven.
+- My biggest lesson as the lead architect is this: AI is powerful, but I still own the blueprint. I decide boundaries, tradeoffs, and what gets merged. Copilot moves fast, but I set direction and quality bar.
 
 ---
 
@@ -44,13 +63,15 @@
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+- I tested sorting by time, filtering by status and pet name, recurrence behavior, conflict detection, and schedule generation.
+- I also tested edge cases like no tasks, exact duplicate start times, unsupported recurrence, and tasks outside the day window.
+- These tests mattered because scheduler bugs are usually edge-case bugs, not happy-path bugs.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+- I am confident in the current implementation because the core scenarios and key edge cases are covered and passing.
+- I would rate reliability at about 4 out of 5 right now.
+- Next, I would test more invalid input handling, more recurrence patterns, and richer multi-pet scheduling pressure cases.
 
 ---
 
@@ -58,12 +79,15 @@
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+- I am most satisfied with keeping the architecture clean while still shipping features quickly.
+- The scheduler methods and test suite now line up, and the UI is using scheduler outputs directly.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+- In another iteration, I would improve task creation in the UI to capture real time windows and recurrence options directly.
+- I would also improve README flow so it reads more like a product manual from top to bottom.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+- My key takeaway is that strong system design still matters more than fast code generation.
+- AI can accelerate implementation, but the best results came when I stayed intentional about boundaries, testing, and tradeoffs.
