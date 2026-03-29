@@ -3,6 +3,7 @@
 ## 1. System Design
 
 **a. Initial design**
+initial requments - a user should be able to add a pet or multiple pets, schedule a task like walk dog or feed the dog or clean pet house, , and see today,s and every other day's task tasks
 
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
