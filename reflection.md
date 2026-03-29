@@ -3,15 +3,12 @@
 ## 1. System Design
 
 **a. Initial design**
-initial requments - a user should be able to add a pet or multiple pets, schedule a task like walk dog or feed the dog or clean pet house, , and see today,s and every other day's task tasks
-
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+- The initial requirements focused on letting a user add one or more pets, create tasks such as walks or feedings, and see plans for today and future days.
+- Designed four core classes: `Owner`, `Pet`, `Task`, and `Scheduler`. `Owner` keeps contact info, availability, preferences, and a list of pets. `Pet` stores identity, needs, and default tasks while helping create new task entries. `Task` holds the work item, duration, priority, preferred time, and completion status. `Scheduler` gathers tasks from the owner, applies constraints, orders tasks, and builds the daily plan with explanations.
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+- Yes. I realized the scheduler needed a stronger tie back to the owner so it always uses that owner’s pets/tasks instead of floating Task lists. I added methods to `Owner`/`Pet` so the scheduler can call `owner.gather_tasks()` and cache those candidates internally. That change let me add pre-filtering logic (day window, max minutes) before sorting tasks and then walk the ranked list sequentially, assigning start minutes so every task in the plan has a concrete why.
 
 ---
 
