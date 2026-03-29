@@ -35,6 +35,23 @@ The scheduler now includes a few practical upgrades for day-to-day pet planning:
 
 These features make the planner more useful in real routines while keeping behavior easy to explain and test.
 
+## Testing PawPal+
+
+Run the full test suite from the project root with:
+
+```bash
+python -m pytest
+```
+
+Current tests cover core scheduler behavior, including:
+
+- Happy paths for task sorting, filtering, and schedule generation by priority.
+- Recurrence logic when completing daily and weekly recurring tasks.
+- Conflict detection for overlapping and duplicate scheduled times.
+- Edge cases like pets with no tasks, case-insensitive pet filtering, unsupported recurrence values, and tasks outside the owner day window.
+
+Confidence Level: 4/5 stars based on passing test results across these critical scheduling scenarios.
+
 ### Setup
 
 ```bash

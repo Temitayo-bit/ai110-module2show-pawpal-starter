@@ -1,5 +1,7 @@
 """Unit tests for basic PawPal task and pet behavior."""
 
+import pytest
+
 from pawpal_system import Availability, Owner, Pet, Preferences, Priority, Scheduler, Task, TaskStatus, TimeWindow
 
 
@@ -233,3 +235,266 @@ def test_detect_schedule_conflicts_returns_empty_when_no_overlap() -> None:
 	warnings = scheduler.detect_schedule_conflicts([first, second])
 
 	assert warnings == []
+
+
+def test_build_plan_schedules_by_priority_and_sequential_start_times() -> None:
+	pet = Pet(name="Luna", species="Cat", age=4)
+	high = pet.create_task(title="High", duration=20, priority=Priority.HIGH)
+	medium = pet.create_task(title="Medium", duration=15, priority=Priority.MEDIUM)
+	low = pet.create_task(title="Low", duration=10, priority=Priority.LOW)
+	high.preferred_window = TimeWindow(start_minutes=480, end_minutes=600)
+	medium.preferred_window = TimeWindow(start_minutes=480, end_minutes=600)
+	low.preferred_window = TimeWindow(start_minutes=480, end_minutes=600)
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=480, end_minutes=600)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(pet)
+
+	scheduler = Scheduler(owner=owner)
+	plan = scheduler.build_plan(owner)
+
+	assert [task.title for task in plan.tasks] == ["High", "Medium", "Low"]
+	assert [task.scheduled_start for task in plan.tasks] == [480, 500, 515]
+	assert high.status == TaskStatus.SCHEDULED
+	assert medium.status == TaskStatus.SCHEDULED
+	assert low.status == TaskStatus.SCHEDULED
+
+
+def test_build_plan_excludes_completed_tasks_from_candidates() -> None:
+	pet = Pet(name="Max", species="Dog", age=6)
+	completed = pet.create_task(title="Already done", duration=15, priority=Priority.HIGH)
+	pending = pet.create_task(title="Still pending", duration=15, priority=Priority.MEDIUM)
+	completed.mark_completed()
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=0, end_minutes=24 * 60)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(pet)
+
+	scheduler = Scheduler(owner=owner)
+	plan = scheduler.build_plan(owner)
+
+	assert completed not in plan.tasks
+	assert pending in plan.tasks
+
+
+def test_filter_tasks_by_pet_name_is_case_insensitive() -> None:
+	luna = Pet(name="Luna", species="Cat", age=4)
+	max_pet = Pet(name="Max", species="Dog", age=6)
+	luna_task = luna.create_task(title="Feed Luna", duration=15, priority=Priority.HIGH)
+	max_pet.create_task(title="Walk Max", duration=20, priority=Priority.MEDIUM)
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=0, end_minutes=24 * 60)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(luna)
+	owner.add_pet(max_pet)
+
+	scheduler = Scheduler(owner=owner)
+	filtered = scheduler.filter_tasks(pet_name="lUnA")
+
+	assert filtered == [luna_task]
+
+
+def test_build_plan_returns_empty_for_pet_with_no_tasks() -> None:
+	pet = Pet(name="Luna", species="Cat", age=4)
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=480, end_minutes=600)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(pet)
+
+	scheduler = Scheduler(owner=owner)
+	plan = scheduler.build_plan(owner)
+
+	assert plan.tasks == []
+	assert plan.explanations == []
+
+
+def test_detect_schedule_conflicts_flags_exact_duplicate_start_times() -> None:
+	luna = Pet(name="Luna", species="Cat", age=4)
+	max_pet = Pet(name="Max", species="Dog", age=6)
+	first = luna.create_task(title="Feed Luna", duration=30, priority=Priority.HIGH)
+	second = max_pet.create_task(title="Walk Max", duration=20, priority=Priority.MEDIUM)
+	first.schedule(540)
+	second.schedule(540)
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=0, end_minutes=24 * 60)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(luna)
+	owner.add_pet(max_pet)
+
+	scheduler = Scheduler(owner=owner)
+	warnings = scheduler.detect_schedule_conflicts([first, second])
+
+	assert len(warnings) == 1
+	assert "Warning: Conflict detected" in warnings[0]
+
+
+def test_detect_schedule_conflicts_does_not_flag_back_to_back_tasks() -> None:
+	pet = Pet(name="Luna", species="Cat", age=4)
+	first = pet.create_task(title="Feed", duration=20, priority=Priority.HIGH)
+	second = pet.create_task(title="Play", duration=10, priority=Priority.LOW)
+	first.schedule(480)
+	second.schedule(500)
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=0, end_minutes=24 * 60)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(pet)
+
+	scheduler = Scheduler(owner=owner)
+	warnings = scheduler.detect_schedule_conflicts([first, second])
+
+	assert warnings == []
+
+
+def test_detect_schedule_conflicts_ignores_unscheduled_tasks() -> None:
+	pet = Pet(name="Luna", species="Cat", age=4)
+	scheduled = pet.create_task(title="Feed", duration=20, priority=Priority.HIGH)
+	unscheduled = pet.create_task(title="Brush", duration=10, priority=Priority.LOW)
+	scheduled.schedule(480)
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=0, end_minutes=24 * 60)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(pet)
+
+	scheduler = Scheduler(owner=owner)
+	warnings = scheduler.detect_schedule_conflicts([scheduled, unscheduled])
+
+	assert warnings == []
+
+
+def test_mark_task_completed_unsupported_recurrence_creates_no_new_task() -> None:
+	pet = Pet(name="Luna", species="Cat", age=4)
+	task = pet.create_task(title="Monthly Bath", duration=20, priority=Priority.MEDIUM)
+	task.recurring = True
+	task.recurrence = "monthly"
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=0, end_minutes=24 * 60)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(pet)
+
+	scheduler = Scheduler(owner=owner)
+	next_task = scheduler.mark_task_completed(task)
+
+	assert task.status == TaskStatus.COMPLETED
+	assert next_task is None
+
+
+def test_mark_task_completed_normalizes_recurrence_casing() -> None:
+	pet = Pet(name="Luna", species="Cat", age=4)
+	task = pet.create_task(title="Feed Luna", duration=15, priority=Priority.HIGH)
+	task.recurring = True
+	task.recurrence = "DAILY"
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=0, end_minutes=24 * 60)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(pet)
+
+	scheduler = Scheduler(owner=owner)
+	next_task = scheduler.mark_task_completed(task)
+
+	assert next_task is not None
+	assert next_task.recurrence == "daily"
+
+
+def test_filter_tasks_with_pet_name_and_no_owner_returns_empty() -> None:
+	scheduler = Scheduler(owner=None)
+	task = Task(
+		title="Feed",
+		description="Feed task",
+		duration_minutes=10,
+		priority=Priority.HIGH,
+		preferred_window=TimeWindow(start_minutes=0, end_minutes=24 * 60),
+	)
+
+	filtered = scheduler.filter_tasks(tasks=[task], pet_name="Luna")
+
+	assert filtered == []
+
+
+def test_build_plan_with_zero_max_daily_minutes_currently_treats_as_no_limit() -> None:
+	pet = Pet(name="Luna", species="Cat", age=4)
+	pet.create_task(title="Feed", duration=15, priority=Priority.HIGH)
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=0, end_minutes=24 * 60)),
+		preferences=Preferences(max_daily_minutes=0),
+	)
+	owner.add_pet(pet)
+
+	scheduler = Scheduler(owner=owner)
+	plan = scheduler.build_plan(owner)
+
+	assert len(plan.tasks) == 1
+
+
+def test_build_plan_excludes_tasks_outside_owner_day_window() -> None:
+	pet = Pet(name="Luna", species="Cat", age=4)
+	inside = pet.create_task(title="Inside Window", duration=20, priority=Priority.HIGH)
+	outside = pet.create_task(title="Outside Window", duration=20, priority=Priority.MEDIUM)
+	inside.preferred_window = TimeWindow(start_minutes=480, end_minutes=540)
+	outside.preferred_window = TimeWindow(start_minutes=700, end_minutes=760)
+
+	owner = Owner(
+		name="Alex",
+		contact_email="alex@example.com",
+		availability=Availability(day_window=TimeWindow(start_minutes=480, end_minutes=600)),
+		preferences=Preferences(),
+	)
+	owner.add_pet(pet)
+
+	scheduler = Scheduler(owner=owner)
+	plan = scheduler.build_plan(owner)
+
+	assert inside in plan.tasks
+	assert outside not in plan.tasks
+
+
+def test_sort_by_time_raises_for_invalid_time_format() -> None:
+	scheduler = Scheduler()
+	task = Task(
+		title="Bad time",
+		description="Invalid HH:MM",
+		duration_minutes=10,
+		priority=Priority.LOW,
+		preferred_window=TimeWindow(start_minutes=0, end_minutes=24 * 60),
+		time="invalid",
+	)
+
+	with pytest.raises(ValueError):
+		scheduler.sort_by_time([task])
