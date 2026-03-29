@@ -21,8 +21,8 @@
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+- One tradeoff I made is that my scheduler builds the day in a simple linear order (priority first, then next available slot) instead of trying to optimize every possible combination of tasks and time windows. That means it is faster and easier to explain, but it can miss a “perfect” plan in edge cases where a different ordering would fit more tasks.
+- I think that tradeoff is reasonable for this scenario because PawPal+ is meant to feel practical and understandable for a busy pet owner. A clear, predictable schedule with explanations is more useful here than a super-complex optimizer that is harder to debug and justify.
 
 ---
 

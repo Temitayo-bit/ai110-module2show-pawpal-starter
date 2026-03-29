@@ -43,7 +43,9 @@ class Task:
     duration_minutes: int
     priority: Priority
     preferred_window: TimeWindow
+    time: str = "00:00"
     recurring: bool = False
+    recurrence: Optional[str] = None
     status: TaskStatus = TaskStatus.PENDING
     scheduled_start: Optional[int] = None
 
@@ -160,6 +162,181 @@ class Scheduler:
         }
         return sorted(filtered, key=lambda t: priority_order.get(t.priority, 3))
 
+    def filter_tasks(
+        self,
+        tasks: Optional[List[Task]] = None,
+        status: Optional[TaskStatus] = None,
+        pet_name: Optional[str] = None,
+    ) -> List[Task]:
+        """Return tasks filtered by optional status and pet name.
+
+        If ``tasks`` is provided, filtering is applied to that explicit list.
+        Otherwise, this method falls back to owner tasks (when an owner is
+        available) and finally to scheduler candidates.
+
+        Args:
+            tasks: Optional task list to filter.
+            status: Optional task status to match.
+            pet_name: Optional pet name (case-insensitive) to scope tasks.
+
+        Returns:
+            A list of tasks matching all provided filters.
+        """
+        if tasks is not None:
+            task_pool = tasks
+        elif self.owner:
+            task_pool = [task for pet in self.owner.pets for task in pet.default_tasks]
+        else:
+            task_pool = self.candidates
+
+        filtered = task_pool
+
+        if status is not None:
+            filtered = [task for task in filtered if task.status == status]
+
+        if pet_name:
+            if not self.owner:
+                return []
+
+            pet_lookup = {
+                pet.name.lower(): pet.default_tasks
+                for pet in self.owner.pets
+            }
+            owner_pet_tasks = pet_lookup.get(pet_name.lower(), [])
+            filtered = [task for task in filtered if task in owner_pet_tasks]
+
+        return filtered
+
+    def sort_by_time(self, tasks: List[Task]) -> List[Task]:
+        """Sort tasks in ascending order using ``Task.time`` in HH:MM format.
+
+        The lambda key converts each ``HH:MM`` string into ``(hour, minute)``
+        so lexical edge cases (for example, ``"12:00"`` vs ``"08:30"``)
+        are handled numerically.
+
+        Args:
+            tasks: The tasks to sort.
+
+        Returns:
+            A new list sorted by clock time.
+        """
+        return sorted(tasks, key=lambda task: tuple(map(int, task.time.split(":"))))
+
+    def _find_pet_for_task(self, task_to_match: Task) -> Optional[Pet]:
+        """Return the pet that owns a task object, if found.
+
+        Args:
+            task_to_match: Task instance to locate in owner pets.
+
+        Returns:
+            The matching pet when found, otherwise ``None``.
+        """
+        if not self.owner:
+            return None
+
+        for pet in self.owner.pets:
+            if task_to_match in pet.default_tasks:
+                return pet
+        return None
+
+    def detect_schedule_conflicts(self, tasks: List[Task]) -> List[str]:
+        """Detect overlapping scheduled tasks and return warning messages.
+
+        A conflict exists when two scheduled tasks overlap by duration using
+        interval logic: ``start_a < end_b`` and ``start_b < end_a``.
+        This method is non-blocking and only reports warnings.
+
+        Args:
+            tasks: Tasks to scan for overlaps. Tasks without ``scheduled_start``
+                are ignored.
+
+        Returns:
+            Human-readable warning strings, one per detected conflict.
+        """
+        warnings: List[str] = []
+        scheduled_tasks = [task for task in tasks if task.scheduled_start is not None]
+
+        for index, first_task in enumerate(scheduled_tasks):
+            first_start = first_task.scheduled_start if first_task.scheduled_start is not None else 0
+            first_end = first_start + first_task.duration_minutes
+
+            for second_task in scheduled_tasks[index + 1 :]:
+                second_start = second_task.scheduled_start if second_task.scheduled_start is not None else 0
+                second_end = second_start + second_task.duration_minutes
+
+                overlaps = first_start < second_end and second_start < first_end
+                if not overlaps:
+                    continue
+
+                first_pet = self._find_pet_for_task(first_task)
+                second_pet = self._find_pet_for_task(second_task)
+                first_pet_name = first_pet.name if first_pet else "Unknown Pet"
+                second_pet_name = second_pet.name if second_pet else "Unknown Pet"
+
+                warnings.append(
+                    "Warning: Conflict detected between "
+                    f"'{first_task.title}' ({first_pet_name}) and "
+                    f"'{second_task.title}' ({second_pet_name}) at overlapping times."
+                )
+
+        return warnings
+
+    def _create_next_recurring_instance(self, task: Task) -> Optional[Task]:
+        """Create the next task instance for supported recurring schedules.
+
+        Only tasks marked recurring with ``daily`` or ``weekly`` recurrence
+        create a successor. The new instance starts in pending state.
+
+        Args:
+            task: Completed source task.
+
+        Returns:
+            A newly created next-occurrence task, or ``None`` when recurrence
+            rules do not apply.
+        """
+        recurrence = (task.recurrence or "").lower()
+        if not task.recurring or recurrence not in {"daily", "weekly"}:
+            return None
+
+        return Task(
+            title=task.title,
+            description=task.description,
+            duration_minutes=task.duration_minutes,
+            priority=task.priority,
+            preferred_window=task.preferred_window,
+            time=task.time,
+            recurring=True,
+            recurrence=recurrence,
+        )
+
+    def mark_task_completed(self, task: Task) -> Optional[Task]:
+        """Mark a task complete and optionally create its next recurrence.
+
+        For supported recurring tasks, this method appends a newly created
+        next-occurrence instance to the same pet and refreshes scheduler
+        candidates. For non-recurring tasks, it only marks completion.
+
+        Args:
+            task: Task to complete.
+
+        Returns:
+            The newly created recurring task instance when applicable,
+            otherwise ``None``.
+        """
+        task.mark_completed()
+        next_task = self._create_next_recurring_instance(task)
+
+        if not next_task:
+            return None
+
+        owner_pet = self._find_pet_for_task(task)
+        if owner_pet:
+            owner_pet.default_tasks.append(next_task)
+            self._sync_candidates()
+            return next_task
+
+        return None
+
     def _filter_by_constraints(self, tasks: List[Task]) -> List[Task]:
         """Drop tasks that clearly exceed time limits or the owner's day window."""
         window = self.day_window or (self.owner.availability.day_window if self.owner else None)
@@ -202,6 +379,8 @@ class Scheduler:
             scheduled_tasks.append(task)
             explanations.append(self.explain_decision(task).message)
             current_minute = end_minute
+
+        explanations.extend(self.detect_schedule_conflicts(scheduled_tasks))
 
         plan = Plan(tasks=scheduled_tasks, explanations=explanations)
         self.current_plan = plan

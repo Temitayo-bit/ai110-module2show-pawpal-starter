@@ -24,6 +24,17 @@ Your final app should:
 
 ## Getting started
 
+## Smarter Scheduling
+
+The scheduler now includes a few practical upgrades for day-to-day pet planning:
+
+- Time sorting: tasks can be sorted by HH:MM values for predictable order.
+- Task filtering: tasks can be filtered by completion status and by pet name.
+- Recurring tasks: when a daily or weekly recurring task is completed, a new next-occurrence task is auto-created.
+- Conflict warnings: overlapping scheduled tasks are detected and returned as warning messages instead of stopping execution.
+
+These features make the planner more useful in real routines while keeping behavior easy to explain and test.
+
 ### Setup
 
 ```bash
